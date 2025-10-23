@@ -1,0 +1,3 @@
+std_msgs/Header header
+string vehicle_name
+int8 vehicle_type
