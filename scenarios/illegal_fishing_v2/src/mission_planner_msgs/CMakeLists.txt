@@ -12,6 +12,13 @@ find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Heartbeat.msg"
+  "msg/Position.msg"
+  "msg/Goto.msg"
+  "msg/Waypoint.msg"
+  "action/Followme.action"
+  "action/Goto.action"
+  "action/Waypoints.action"
+  "action/ReturnToLaunch.action"
   DEPENDENCIES std_msgs
 )
 

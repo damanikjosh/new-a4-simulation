@@ -1,0 +1,14 @@
+# Goal
+float64 latitude_deg
+float64 longitude_deg
+float32 absolute_altitude_m
+float32 yaw_deg
+float32 speed_m_s
+---
+# Result
+bool success
+float32 final_distance_to_target_m
+---
+# Feedback
+float32 distance_to_target_m
+float32 current_speed_m_s

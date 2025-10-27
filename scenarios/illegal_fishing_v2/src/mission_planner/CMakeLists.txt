@@ -8,6 +8,7 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_action REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(mission_planner_msgs REQUIRED)
@@ -18,8 +19,15 @@ include_directories(
   include
 )
 
-add_executable(vehicle src/vehicle.cpp)
-ament_target_dependencies(vehicle rclcpp std_msgs sensor_msgs mission_planner_msgs)
+add_executable(vehicle 
+  src/vehicle.cpp
+  src/actions/action.cpp
+  src/actions/goto_action.cpp
+  src/actions/followme_action.cpp
+  src/actions/waypoints_action.cpp
+  src/actions/rtl_action.cpp
+)
+ament_target_dependencies(vehicle rclcpp rclcpp_action std_msgs sensor_msgs mission_planner_msgs)
 target_link_libraries(vehicle MAVSDK::mavsdk)
 
 install(TARGETS vehicle

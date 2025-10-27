@@ -3,9 +3,9 @@
 
 enum class VehicleType
 {
-  UAV = 0,
-  USV = 1,
-  Enemy = 2
+    UAV = 0,
+    USV = 1,
+    Enemy = 2
 };
 
-#endif  // MISSION_PLANNER__VEHICLE_TYPE_HPP__
+#endif // MISSION_PLANNER__VEHICLE_TYPE_HPP__

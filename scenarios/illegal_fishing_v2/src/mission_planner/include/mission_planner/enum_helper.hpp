@@ -93,5 +93,44 @@ const char * action_result_str(mavsdk::Action::Result result) {
     }
 }
 
+// Unknown	Unknown result.
+// Success	Request succeeded.
+// Error	Error.
+// TooManyMissionItems	Too many mission items in the mission.
+// Busy	Vehicle is busy.
+// Timeout	Request timed out.
+// InvalidArgument	Invalid argument.
+// Unsupported	Mission downloaded from the system is not supported.
+// NoMissionAvailable	No mission available on the system.
+// UnsupportedMissionCmd	Unsupported mission command.
+// TransferCancelled	Mission transfer (upload or download) has been cancelled.
+// NoSystem	No system connected.
+// Next	Intermediate message showing progress.
+// Denied	Request denied.
+// ProtocolError	There was a protocol error.
+// IntMessagesNotSupported	The system does not support the MISSION_INT protocol.
+
+const char * mission_result_str(mavsdk::Mission::Result result) {
+    switch (result) {
+    case mavsdk::Mission::Result::Unknown: return "Unknown";
+    case mavsdk::Mission::Result::Success: return "Success";
+    case mavsdk::Mission::Result::Error: return "Error";
+    case mavsdk::Mission::Result::TooManyMissionItems: return "TooManyMissionItems";
+    case mavsdk::Mission::Result::Busy: return "Busy";
+    case mavsdk::Mission::Result::Timeout: return "Timeout";
+    case mavsdk::Mission::Result::InvalidArgument: return "InvalidArgument";
+    case mavsdk::Mission::Result::Unsupported: return "Unsupported";
+    case mavsdk::Mission::Result::NoMissionAvailable: return "NoMissionAvailable";
+    case mavsdk::Mission::Result::UnsupportedMissionCmd: return "UnsupportedMissionCmd";
+    case mavsdk::Mission::Result::TransferCancelled: return "TransferCancelled";
+    case mavsdk::Mission::Result::NoSystem: return "NoSystem";
+    case mavsdk::Mission::Result::Next: return "Next";
+    case mavsdk::Mission::Result::Denied: return "Denied";
+    case mavsdk::Mission::Result::ProtocolError: return "ProtocolError";
+    case mavsdk::Mission::Result::IntMessagesNotSupported: return "IntMessagesNotSupported";
+    default: return "UnknownMissionResult";
+    }
+}
+
 
 #endif  // MISSION_PLANNER__ENUM_HELPER_HPP__

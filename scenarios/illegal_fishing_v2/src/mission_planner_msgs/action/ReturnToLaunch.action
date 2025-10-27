@@ -1,0 +1,9 @@
+# Goal - no parameters needed for RTL
+---
+# Result
+bool success
+float32 final_distance_to_home_m
+---
+# Feedback
+float32 distance_to_home_m
+float32 current_altitude_m

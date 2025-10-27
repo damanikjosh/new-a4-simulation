@@ -1,0 +1,6 @@
+std_msgs/Header header
+float64 latitude_deg
+float64 longitude_deg
+float32 absolute_altitude_m
+float32 yaw_deg
+float32 speed_m_s

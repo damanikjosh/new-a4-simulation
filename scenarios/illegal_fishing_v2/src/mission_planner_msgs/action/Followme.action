@@ -1,0 +1,6 @@
+std_msgs/Header header
+string vehicle_name
+---
+float32 distance_to_target_m
+---
+float32 distance_to_target_m
