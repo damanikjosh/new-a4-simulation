@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Leaflet.js Example</title>
+    <!-- <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""/> -->
+    <link rel="stylesheet" type="text/css" href="leaflet.css">
+    <!-- <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""></script> -->
+    <script src="leaflet.js"></script>
+    <!-- <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans&display=swap"> -->
+    <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body style="font-family: 'Noto Sans', sans-serif;">
+    <div id="map"></div>
+    <div class="checkbox-container">
+        <button id="enable-all" class="mr-2">Enable All</button>
+        <label><input type="checkbox" value="14540"> 0</label>
+        <label><input type="checkbox" value="14541"> 1</label>
+        <label><input type="checkbox" value="14542"> 2</label>
+        <label><input type="checkbox" value="14543"> 3</label>
+        <label><input type="checkbox" value="14544"> 4</label>
+        <label><input type="checkbox" value="14545"> 5</label>
+        <label><input type="checkbox" value="14546"> 6</label>
+        <label><input type="checkbox" value="14547"> 7</label>
+        <label><input type="checkbox" value="14548"> 8</label>
+        <label><input type="checkbox" value="14549"> 9</label>
+    </div>
+    <script>
+        var map = L.map('map').setView([51.505, -0.09], 13);
+        var vehicles_status = {};
+        var vehicle_positions = {};
+        var vehicle_missions = {};
+        var vehicle_circles = {}; // Add this line
+
+        map.attributionControl.setPrefix('');
+        L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{
+            maxZoom: 20,
+            subdomains:['mt0','mt1','mt2','mt3']
+        }).addTo(map);
+
+
+        async function fetchVehiclePositions() {
+            minLat = 90;
+            maxLat = -90;
+            minLon = 180;
+            maxLon = -180;
+            for (const vehicle_id in vehicles_status) {
+                const response = await fetch('/position/' + vehicle_id);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    if (vehicle_positions[vehicle_id] === undefined) {
+                        vehicle_positions[vehicle_id] = L.marker([data.latitude, data.longitude])
+                            .addTo(map)
+                            .bindPopup('Port: ' + vehicle_id); // Add popup with port number
+                        vehicle_circles[vehicle_id] = L.circle([data.latitude, data.longitude], { radius: 111 }).addTo(map); // Change radius to 1110
+                        // Center the map on the first vehicle, zoom closely
+                        minLat = Math.min(minLat, data.latitude);
+                        maxLat = Math.max(maxLat, data.latitude);
+                        minLon = Math.min(minLon, data.longitude);
+                        maxLon = Math.max(maxLon, data.longitude);
+                    } else {
+                        vehicle_positions[vehicle_id].setLatLng([data.latitude, data.longitude]);
+                        vehicle_circles[vehicle_id].setLatLng([data.latitude, data.longitude]); // Update circle center
+                    }
+                }
+            }
+
+            if (minLat !== 90 && maxLat !== -90 && minLon !== 180 && maxLon !== -180) {
+                map.fitBounds([[minLat, minLon], [maxLat, maxLon]]);
+            }
+        }
+
+        async function fetchVehicleMissions() {
+            minLat = 90;
+            maxLat = -90;
+            minLon = 180;
+            maxLon = -180;
+
+            for (const vehicle_id in vehicles_status) {
+                const response = await fetch('/mission/' + vehicle_id);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    if (vehicle_missions[vehicle_id] === undefined) {
+                        vehicle_missions[vehicle_id] = L.polyline(data.map(function(point) {
+                            minLat = Math.min(minLat, point.latitude);
+                            maxLat = Math.max(maxLat, point.latitude);
+                            minLon = Math.min(minLon, point.longitude);
+                            maxLon = Math.max(maxLon, point.longitude);
+                            return [point.latitude, point.longitude];
+                        }), {color: 'red'}).addTo(map);
+
+                    } else {
+                        vehicle_missions[vehicle_id].setLatLngs(data.map(function(point) {
+                            return [point.latitude, point.longitude];
+                        }));
+                        
+                    }
+                }
+            }
+
+            if (minLat !== 90 && maxLat !== -90 && minLon !== 180 && maxLon !== -180) {
+                map.fitBounds([[minLat, minLon], [maxLat, maxLon]]);
+            }
+        }
+
+        function handleInit() {
+            document.querySelectorAll('.checkbox-container input[type="checkbox"]').forEach(function(checkbox) {
+                checkbox.checked = true;
+                handleCheckboxChange(checkbox);
+            });
+        }
+
+        async function handleCheckboxChange(checkbox) {
+            checkbox.disabled = true;
+            if (checkbox.checked) {
+                await handleEnable(checkbox);
+            } else {
+                await handleDisable(checkbox);
+            }
+            checkbox.disabled = false;
+        }
+
+        async function handleEnable(checkbox) {
+            const response = await fetch('/enable/' + checkbox.value, {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                vehicles_status[checkbox.value] = true;
+                checkbox.checked = true;
+            } else {
+                checkbox.checked = false;
+            }
+        }
+
+        async function handleDisable(checkbox) {
+            delete vehicles_status[checkbox.value];
+            checkbox.checked = false;
+            // Remove the vehicle from the map
+            map.removeLayer(vehicle_positions[checkbox.value]);
+            delete vehicle_positions[checkbox.value];
+            map.removeLayer(vehicle_circles[checkbox.value]); // Remove circle
+            delete vehicle_circles[checkbox.value]; // Delete circle reference
+            map.removeLayer(vehicle_missions[checkbox.value]);
+            delete vehicle_missions[checkbox.value];
+        }
+
+        document.querySelectorAll('.checkbox-container input[type="checkbox"]').forEach(function(checkbox) {
+            checkbox.addEventListener('change', async function() {
+                handleCheckboxChange(checkbox);
+            });
+        });
+
+        document.getElementById('enable-all').addEventListener('click', async function() {
+            document.querySelectorAll('.checkbox-container input[type="checkbox"]').forEach(function(checkbox) {
+                checkbox.checked = true;
+                handleCheckboxChange(checkbox);
+            });
+        });
+
+        handleInit();
+        setInterval(fetchVehiclePositions, 1000);
+        setInterval(fetchVehicleMissions, 5000);
+    </script>
+</body>
+</html>

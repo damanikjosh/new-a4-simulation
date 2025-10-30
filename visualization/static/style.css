@@ -1,0 +1,27 @@
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+#map {
+    height: calc(100% - 40px); /* Adjust height to leave space for checkboxes */
+    margin: 0;
+    padding: 0;
+}
+
+.checkbox-container {
+    display: flex;
+    justify-content: center;
+    margin-top: 10px;
+    position: relative;
+    z-index: 1000;
+}
+
+.checkbox-container label {
+    margin-right: 10px;
+}
+
+.checkbox-container button {
+    margin-right: 10px;
+}
