@@ -18,6 +18,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/Followme.action"
   "action/Goto.action"
   "action/Waypoints.action"
+  "action/Search.action"
   "action/ReturnToLaunch.action"
   DEPENDENCIES std_msgs
 )

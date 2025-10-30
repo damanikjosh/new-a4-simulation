@@ -7,36 +7,27 @@
 namespace mission_planner
 {
 
-class GotoActionHandler : public BaseActionHandler<mission_planner_msgs::action::Goto>
-{
-public:
-  using GotoAction = mission_planner_msgs::action::Goto;
-  using GoalHandleGoto = rclcpp_action::ServerGoalHandle<GotoAction>;
+    class GotoActionHandler : public BaseActionHandler<mission_planner_msgs::action::Goto>
+    {
+    public:
+        using GotoAction = mission_planner_msgs::action::Goto;
+        using GoalHandleGoto = rclcpp_action::ServerGoalHandle<GotoAction>;
 
-  explicit GotoActionHandler(Vehicle* vehicle);
+        explicit GotoActionHandler(Vehicle *vehicle);
 
-  void stop() override;
+    protected:
+        bool initialize_task(std::shared_ptr<const typename GotoAction::Goal> goal) override;
+        void stop_task() override;
+        std::shared_ptr<GotoAction::Result> get_cancel_result() override;
+        std::shared_ptr<GotoAction::Result> get_finish_result() override;
+        std::shared_ptr<GotoAction::Feedback> get_feedback() override;
+        bool is_finished() override;
 
-protected:
-  rclcpp_action::GoalResponse handle_goal(
-    const rclcpp_action::GoalUUID & uuid,
-    std::shared_ptr<const GotoAction::Goal> goal) override;
 
-  rclcpp_action::CancelResponse handle_cancel(
-    const std::shared_ptr<GoalHandleGoto> goal_handle) override;
+    private:
+        std::shared_ptr<GotoAction::Feedback> feedback_;
+    };
 
-  void handle_accepted(const std::shared_ptr<GoalHandleGoto> goal_handle) override;
+} // namespace mission_planner
 
-  void execute(const std::shared_ptr<GoalHandleGoto> goal_handle) override;
-
-  void timer_callback() override;
-
-private:
-  std::shared_ptr<GotoAction::Goal> current_goal_msg_;
-  std::shared_ptr<GotoAction::Feedback> feedback_;
-  std::shared_ptr<GotoAction::Result> result_;
-};
-
-}  // namespace mission_planner
-
-#endif  // MISSION_PLANNER__ACTIONS__GOTO_ACTION_HPP_
+#endif // MISSION_PLANNER__ACTIONS__GOTO_ACTION_HPP_

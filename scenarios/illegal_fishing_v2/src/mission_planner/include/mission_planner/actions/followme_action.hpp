@@ -16,21 +16,14 @@ public:
 
   explicit FollowMeActionHandler(Vehicle* vehicle);
 
-  void stop() override;
-
 protected:
-  rclcpp_action::GoalResponse handle_goal(
-    const rclcpp_action::GoalUUID & uuid,
-    std::shared_ptr<const FollowMeAction::Goal> goal) override;
-
-  rclcpp_action::CancelResponse handle_cancel(
-    const std::shared_ptr<GoalHandleFollowMe> goal_handle) override;
-
-  void handle_accepted(const std::shared_ptr<GoalHandleFollowMe> goal_handle) override;
-
-  void execute(const std::shared_ptr<GoalHandleFollowMe> goal_handle) override;
-
-  void timer_callback() override;
+  bool initialize_task(std::shared_ptr<const typename FollowMeAction::Goal> goal) override;
+  void stop_task() override;
+  std::shared_ptr<FollowMeAction::Result> get_cancel_result() override;
+  std::shared_ptr<FollowMeAction::Result> get_finish_result() override;
+  std::shared_ptr<FollowMeAction::Feedback> get_feedback() override;
+  bool is_finished() override;
+  bool is_goal_valid(const std::shared_ptr<const typename FollowMeAction::Goal> goal) override;
 
 private:
   // FollowMe-specific members
@@ -38,7 +31,6 @@ private:
   std::string current_target_name_;
   mission_planner_msgs::msg::Position target_position_;
   std::shared_ptr<FollowMeAction::Feedback> feedback_;
-  std::shared_ptr<FollowMeAction::Result> result_;
 };
 
 }  // namespace mission_planner

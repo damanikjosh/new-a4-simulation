@@ -6,22 +6,20 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "mission_planner/vehicle.hpp"
-#include "mission_planner/enum_helper.hpp"
-#include "mission_planner/utils.hpp"
 #include "mission_planner/actions/goto_action.hpp"
 #include "mission_planner/actions/followme_action.hpp"
 #include "mission_planner/actions/waypoints_action.hpp"
 #include "mission_planner/actions/rtl_action.hpp"
-
-#include "mission_planner_msgs/msg/goto.hpp"
-#include "mission_planner_msgs/msg/waypoints_item.hpp"
-#include "mission_planner_msgs/msg/waypoints.hpp"
-#include "std_msgs/msg/string.hpp"
+#include "mission_planner/actions/search_action.hpp"
+#include "mission_planner/enum_helper.hpp"
+#include "mission_planner/utils.hpp"
 
 using namespace std::chrono_literals;
 
 namespace mission_planner
 {
+
+  Vehicle::~Vehicle() = default;
 
   Vehicle::Vehicle()
       : Node("vehicle")
@@ -85,33 +83,30 @@ namespace mission_planner
     timer_ = this->create_wall_timer(1000ms, std::bind(&Vehicle::publish_heartbeat, this));
 
     // Create position subscription
-    telemetry_->subscribe_position(
-        std::bind(&Vehicle::position_callback, this, std::placeholders::_1));
+    telemetry_->subscribe_position(std::bind(&Vehicle::position_callback, this, std::placeholders::_1));
+    telemetry_->subscribe_heading(std::bind(&Vehicle::heading_callback, this, std::placeholders::_1));
+    telemetry_->subscribe_armed(std::bind(&Vehicle::arm_callback, this, std::placeholders::_1));
+    telemetry_->subscribe_flight_mode(std::bind(&Vehicle::flight_mode_callback, this, std::placeholders::_1));
 
-    telemetry_->subscribe_heading(
-        std::bind(&Vehicle::heading_callback, this, std::placeholders::_1));
+    auto goto_action_handler = std::make_shared<GotoActionHandler>(this);
+    goto_action_handler->create_server(vehicle_name_ + std::string("/task/goto"));
+    action_handlers_.push_back(goto_action_handler);
 
-    telemetry_->subscribe_armed(
-        std::bind(&Vehicle::arm_callback, this, std::placeholders::_1));
+    auto followme_action_handler = std::make_shared<FollowMeActionHandler>(this);
+    followme_action_handler->create_server(vehicle_name_ + std::string("/task/followme"));
+    action_handlers_.push_back(followme_action_handler);
 
-    telemetry_->subscribe_flight_mode(
-        std::bind(&Vehicle::flight_mode_callback, this, std::placeholders::_1));
+    auto waypoints_action_handler = std::make_shared<WaypointsActionHandler>(this);
+    waypoints_action_handler->create_server(vehicle_name_ + std::string("/task/waypoints"));
+    action_handlers_.push_back(waypoints_action_handler);
 
-    // Create action handlers
-    goto_action_handler_ = std::make_unique<GotoActionHandler>(this);
-    followme_action_handler_ = std::make_unique<FollowMeActionHandler>(this);
-    waypoints_action_handler_ = std::make_unique<WaypointsActionHandler>(this);
-    rtl_action_handler_ = std::make_unique<RtlActionHandler>(this);
+    auto rtl_action_handler = std::make_shared<RtlActionHandler>(this);
+    rtl_action_handler->create_server(vehicle_name_ + std::string("/task/rtl"));
+    action_handlers_.push_back(rtl_action_handler);
 
-    // Register action servers with this node
-    goto_action_handler_->create_server(this, vehicle_name_ + std::string("/task/goto"));
-    followme_action_handler_->create_server(this, vehicle_name_ + std::string("/task/followme"));
-    waypoints_action_handler_->create_server(this, vehicle_name_ + std::string("/task/waypoints"));
-    rtl_action_handler_->create_server(this, vehicle_name_ + std::string("/task/return_to_launch"));
-
-    task_stop_sub_ = this->create_subscription<std_msgs::msg::Empty>(
-        vehicle_name_ + std::string("/task/stop"), 10,
-        std::bind(&Vehicle::stop_all_tasks, this, std::placeholders::_1));
+    auto search_action_handler = std::make_shared<SearchActionHandler>(this);
+    search_action_handler->create_server(vehicle_name_ + std::string("/task/search"));
+    action_handlers_.push_back(search_action_handler);
   }
 
   void Vehicle::arm_callback(bool is_armed)
@@ -139,7 +134,6 @@ namespace mission_planner
     current_position_.absolute_altitude_m = position.absolute_altitude_m;
     current_position_.relative_altitude_m = position.relative_altitude_m;
 
-    // Here you can publish the position message if needed
     position_pub_->publish(current_position_);
   }
 
@@ -153,8 +147,6 @@ namespace mission_planner
     if (flight_mode != flight_mode_)
     {
       RCLCPP_INFO(this->get_logger(), "%s flight mode: %s", vehicle_name_.c_str(), flight_mode_str(flight_mode));
-
-      // Don't automatically stop tasks on flight mode change - let action handlers manage completion
     }
     flight_mode_ = flight_mode;
   }
@@ -174,7 +166,7 @@ namespace mission_planner
   // Goto/FollowMe/Waypoints/ReturnToLaunch logic has been extracted from Vehicle
   // to keep Vehicle focused and to let the handlers manage goal lifecycle.
 
-  void Vehicle::ensure_armed_and_takeoff()
+  bool Vehicle::ensure_armed_and_takeoff()
   {
     if (!is_armed_)
     {
@@ -184,7 +176,7 @@ namespace mission_planner
       {
         RCLCPP_ERROR(this->get_logger(), "Failed to arm %s: %s",
                      vehicle_name_.c_str(), action_result_str(arm_result));
-        return;
+        return false;
       }
     }
 
@@ -196,7 +188,7 @@ namespace mission_planner
       {
         RCLCPP_ERROR(this->get_logger(), "Failed to takeoff %s: %s",
                      vehicle_name_.c_str(), action_result_str(takeoff_result));
-        return;
+        return false;
       }
 
       // Wait until flight mode is Hold
@@ -206,35 +198,39 @@ namespace mission_planner
         std::this_thread::sleep_for(1s);
       }
     }
+
+    // Sleep for 2 seconds to allow stabilization
+    std::this_thread::sleep_for(2s);
+    return true;
   }
 
-  void Vehicle::stop_all_tasks(const std_msgs::msg::Empty::SharedPtr /*msg*/)
-  {
-    RCLCPP_INFO(this->get_logger(), "Stopping all tasks on %s", vehicle_name_.c_str());
+  // void Vehicle::stop_all_tasks(const std_msgs::msg::Empty::SharedPtr /*msg*/)
+  // {
+  //   RCLCPP_INFO(this->get_logger(), "Stopping all tasks on %s", vehicle_name_.c_str());
 
-    // Stop all action handlers
-    if (goto_action_handler_)
-    {
-      goto_action_handler_->stop();
-    }
+  //   // Stop all action handlers
+  //   // if (goto_action_handler_)
+  //   // {
+  //   //   goto_action_handler_->stop();
+  //   // }
 
-    if (followme_action_handler_)
-    {
-      followme_action_handler_->stop();
-    }
+  //   // if (followme_action_handler_)
+  //   // {
+  //   //   followme_action_handler_->stop();
+  //   // }
 
-    if (waypoints_action_handler_)
-    {
-      waypoints_action_handler_->stop();
-    }
+  //   // if (waypoints_action_handler_)
+  //   // {
+  //   //   waypoints_action_handler_->stop();
+  //   // }
 
-    if (rtl_action_handler_)
-    {
-      rtl_action_handler_->stop();
-    }
+  //   // if (rtl_action_handler_)
+  //   // {
+  //   //   rtl_action_handler_->stop();
+  //   // }
 
-    current_task_ = TaskType::None;
-  }
+  //   current_task_ = TaskType::None;
+  // }
 
 } // namespace mission_planner
 

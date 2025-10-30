@@ -24,11 +24,6 @@
 #include "mission_planner_msgs/msg/position.hpp"
 #include "std_msgs/msg/empty.hpp"
 
-#include "mission_planner/actions/goto_action.hpp"
-#include "mission_planner/actions/followme_action.hpp"
-#include "mission_planner/actions/waypoints_action.hpp"
-#include "mission_planner/actions/rtl_action.hpp"
-
 namespace mission_planner
 {
 
@@ -36,6 +31,7 @@ namespace mission_planner
     {
     public:
         Vehicle();
+        ~Vehicle();
 
         // Public accessors for action handlers
         std::string vehicle_name_;
@@ -52,8 +48,8 @@ namespace mission_planner
         std::shared_ptr<mavsdk::FollowMe> follow_me_;
 
         // Utility functions for action handlers
-        void ensure_armed_and_takeoff();
-        void stop_all_tasks(const std_msgs::msg::Empty::SharedPtr msg = nullptr);
+        bool ensure_armed_and_takeoff();
+        // void stop_all_tasks(const std_msgs::msg::Empty::SharedPtr msg = nullptr);
 
     private:
         // Configuration
@@ -64,13 +60,10 @@ namespace mission_planner
         rclcpp::Publisher<mission_planner_msgs::msg::Position>::SharedPtr position_pub_;
 
         // Action handlers
-        std::unique_ptr<GotoActionHandler> goto_action_handler_;
-        std::unique_ptr<FollowMeActionHandler> followme_action_handler_;
-        std::unique_ptr<WaypointsActionHandler> waypoints_action_handler_;
-        std::unique_ptr<RtlActionHandler> rtl_action_handler_;
+        std::vector<std::shared_ptr<void>> action_handlers_;
 
         // Subscribers
-        rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr task_stop_sub_;
+        // rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr task_stop_sub_;
 
         // State
         bool is_armed_ = false;

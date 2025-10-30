@@ -7,6 +7,7 @@ enum class TaskType
     Goto = 1,
     FollowMe = 2,
     Waypoints = 3,
+    Search = 4,
     Return = 99
 };
 

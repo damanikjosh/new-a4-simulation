@@ -17,26 +17,17 @@ public:
 
   explicit RtlActionHandler(Vehicle* vehicle);
 
-  void stop() override;
-
 protected:
-  rclcpp_action::GoalResponse handle_goal(
-    const rclcpp_action::GoalUUID & uuid,
-    std::shared_ptr<const ReturnToLaunchAction::Goal> goal) override;
-
-  rclcpp_action::CancelResponse handle_cancel(
-    const std::shared_ptr<GoalHandleReturnToLaunch> goal_handle) override;
-
-  void handle_accepted(const std::shared_ptr<GoalHandleReturnToLaunch> goal_handle) override;
-
-  void execute(const std::shared_ptr<GoalHandleReturnToLaunch> goal_handle) override;
-
-  void timer_callback() override;
+  bool initialize_task(std::shared_ptr<const typename ReturnToLaunchAction::Goal> goal) override;
+  void stop_task() override;
+  std::shared_ptr<ReturnToLaunchAction::Result> get_cancel_result() override;
+  std::shared_ptr<ReturnToLaunchAction::Result> get_finish_result() override;
+  std::shared_ptr<ReturnToLaunchAction::Feedback> get_feedback() override;
+  bool is_finished() override;
 
 private:
   mavsdk::Telemetry::Position home_position_;
   std::shared_ptr<ReturnToLaunchAction::Feedback> feedback_;
-  std::shared_ptr<ReturnToLaunchAction::Result> result_;
 };
 
 }  // namespace mission_planner

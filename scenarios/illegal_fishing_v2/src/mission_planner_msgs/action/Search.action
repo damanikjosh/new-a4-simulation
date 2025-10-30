@@ -1,0 +1,14 @@
+# Goal
+mission_planner_msgs/Waypoint[] waypoints
+string[] vehicle_names
+float32 search_radius_m
+---
+# Result
+bool success
+uint32 waypoints_completed
+---
+# Feedback
+uint32 current_waypoint_index
+uint32 total_waypoints
+float32 distance_to_current_waypoint_m
+string[] vehicles_in_range

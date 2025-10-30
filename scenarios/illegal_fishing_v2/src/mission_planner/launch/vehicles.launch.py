@@ -84,6 +84,13 @@ def generate_launch_description():
                      'port': 14549}]  # 2 for enemy
     )
 
+    mission_planner_node = Node(
+        package='mission_planner',
+        executable='mission_planner_node.py',
+        name='mission_planner',
+        output='screen'
+    )
+
     ld.add_action(uav1_node)
     ld.add_action(uav2_node)
     ld.add_action(uav3_node)
@@ -91,5 +98,6 @@ def generate_launch_description():
     ld.add_action(usv5_node)
     ld.add_action(enemy8_node)
     ld.add_action(enemy9_node)
+    ld.add_action(mission_planner_node)
 
     return ld

@@ -10,63 +10,14 @@ namespace mission_planner
     RtlActionHandler::RtlActionHandler(Vehicle *vehicle)
         : BaseActionHandler(vehicle, std::chrono::milliseconds(1000))  // 1Hz timer
     {
-    }
-
-    void RtlActionHandler::stop()
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-
-        // Call base class stop (handles timer cleanup)
-        BaseActionHandler::stop();
-
-        if (vehicle_->current_task_ == TaskType::Return)
-        {
-            vehicle_->action_->hold();
-        }
-
-        if (vehicle_->current_task_ == TaskType::Return)
-        {
-            vehicle_->current_task_ = TaskType::None;
-        }
-
-        RCLCPP_INFO(vehicle_->get_logger(), "Stopped RTL task");
-    }
-
-    rclcpp_action::GoalResponse RtlActionHandler::handle_goal(
-        const rclcpp_action::GoalUUID &uuid,
-        std::shared_ptr<const ReturnToLaunchAction::Goal> goal)
-    {
-        (void)uuid;
-        (void)goal;
-        RCLCPP_INFO(vehicle_->get_logger(), "Received return to launch goal");
-        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
-    }
-
-    rclcpp_action::CancelResponse RtlActionHandler::handle_cancel(
-        const std::shared_ptr<GoalHandleReturnToLaunch> goal_handle)
-    {
-        RCLCPP_INFO(vehicle_->get_logger(), "Received request to cancel return to launch goal");
-        (void)goal_handle;
-        return rclcpp_action::CancelResponse::ACCEPT;
-    }
-
-    void RtlActionHandler::handle_accepted(const std::shared_ptr<GoalHandleReturnToLaunch> goal_handle)
-    {
-        // No need for separate thread - timer will handle periodic checks
-        execute(goal_handle);
-    }
-
-    void RtlActionHandler::execute(const std::shared_ptr<GoalHandleReturnToLaunch> goal_handle)
-    {
         feedback_ = std::make_shared<ReturnToLaunchAction::Feedback>();
-        result_ = std::make_shared<ReturnToLaunchAction::Result>();
+    }
 
+    bool RtlActionHandler::initialize_task(std::shared_ptr<const typename ReturnToLaunchAction::Goal> goal)
+    {
+        (void)goal;
+        
         RCLCPP_INFO(vehicle_->get_logger(), "Executing return to launch for %s", vehicle_->vehicle_name_.c_str());
-
-        {
-            std::lock_guard<std::mutex> lk(mutex_);
-            current_goal_ = goal_handle;
-        }
 
         // Get home position for distance calculation
         home_position_ = vehicle_->telemetry_->home();
@@ -77,80 +28,55 @@ namespace mission_planner
         {
             RCLCPP_ERROR(vehicle_->get_logger(), "Failed to command RTL for %s",
                          vehicle_->vehicle_name_.c_str());
-            result_->success = false;
-            result_->final_distance_to_home_m = 0.0f;
-            goal_handle->abort(result_);
-
-            std::lock_guard<std::mutex> lk(mutex_);
-            current_goal_.reset();
-            return;
+            return false;
         }
 
-        vehicle_->current_task_ = TaskType::Return;
-
-        // Start timer for periodic feedback publishing
-        start_timer();
+        RCLCPP_INFO(vehicle_->get_logger(), "RTL command sent successfully");
+        return true;
     }
 
-    void RtlActionHandler::timer_callback()
+    void RtlActionHandler::stop_task()
     {
-        std::lock_guard<std::mutex> lk(mutex_);
-
-        if (!current_goal_)
+        if (vehicle_->action_)
         {
-            stop_timer();
-            return;
+            vehicle_->action_->hold();
         }
+        RCLCPP_INFO(vehicle_->get_logger(), "Stopped RTL task");
+    }
 
-        // Check if landed (vehicle-agnostic completion criteria) FIRST
-        if (!vehicle_->telemetry_->in_air())
-        {
-            stop_timer();
-            
-            // Calculate final distance to home
-            {
-                std::lock_guard<std::mutex> position_lock(vehicle_->mission_mutex_);
-                result_->final_distance_to_home_m = static_cast<float>(
-                    mission_planner::utils::haversine_distance(
-                        vehicle_->current_position_.latitude_deg, vehicle_->current_position_.longitude_deg,
-                        home_position_.latitude_deg, home_position_.longitude_deg));
-            }
-            
-            result_->success = true;
-            current_goal_->succeed(result_);
-            RCLCPP_INFO(vehicle_->get_logger(), "Returned to launch and landed (%.2f m from home)",
-                        result_->final_distance_to_home_m);
-            current_goal_ = nullptr;
-            vehicle_->current_task_ = TaskType::None;
-            return;
-        }
+    std::shared_ptr<RtlActionHandler::ReturnToLaunchAction::Result> RtlActionHandler::get_cancel_result()
+    {
+        std::shared_ptr<ReturnToLaunchAction::Result> result = std::make_shared<ReturnToLaunchAction::Result>();
+        result->success = false;
+        result->final_distance_to_home_m = feedback_->distance_to_home_m;
+        return result;
+    }
 
-        // Check if there's a cancel request
-        if (current_goal_->is_canceling())
-        {
-            stop_timer();
-            result_->success = false;
-            result_->final_distance_to_home_m = feedback_->distance_to_home_m;
-            current_goal_->canceled(result_);
-            RCLCPP_INFO(vehicle_->get_logger(), "Return to launch goal canceled");
-            current_goal_ = nullptr;
-            vehicle_->current_task_ = TaskType::None;
-            return;
-        }
+    std::shared_ptr<RtlActionHandler::ReturnToLaunchAction::Result> RtlActionHandler::get_finish_result()
+    {
+        std::shared_ptr<ReturnToLaunchAction::Result> result = std::make_shared<ReturnToLaunchAction::Result>();
+        result->success = true;
+        result->final_distance_to_home_m = feedback_->distance_to_home_m;
+        return result;
+    }
 
+    std::shared_ptr<RtlActionHandler::ReturnToLaunchAction::Feedback> RtlActionHandler::get_feedback()
+    {
         // Calculate distance to home and current altitude
-        {
-            std::lock_guard<std::mutex> position_lock(vehicle_->mission_mutex_);
+        feedback_->distance_to_home_m = static_cast<float>(
+            mission_planner::utils::haversine_distance(
+                vehicle_->current_position_.latitude_deg, vehicle_->current_position_.longitude_deg,
+                home_position_.latitude_deg, home_position_.longitude_deg));
 
-            feedback_->distance_to_home_m = static_cast<float>(
-                mission_planner::utils::haversine_distance(
-                    vehicle_->current_position_.latitude_deg, vehicle_->current_position_.longitude_deg,
-                    home_position_.latitude_deg, home_position_.longitude_deg));
+        feedback_->current_altitude_m = vehicle_->current_position_.relative_altitude_m;
 
-            feedback_->current_altitude_m = vehicle_->current_position_.relative_altitude_m;
-        }
+        return feedback_;
+    }
 
-        current_goal_->publish_feedback(feedback_);
+    bool RtlActionHandler::is_finished()
+    {
+        // Check if landed (vehicle-agnostic completion criteria)
+        return !vehicle_->telemetry_->in_air();
     }
 
 } // namespace mission_planner

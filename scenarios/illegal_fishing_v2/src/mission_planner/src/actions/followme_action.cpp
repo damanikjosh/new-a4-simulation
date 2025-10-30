@@ -9,97 +9,40 @@ namespace mission_planner
     FollowMeActionHandler::FollowMeActionHandler(Vehicle *vehicle)
         : BaseActionHandler(vehicle, std::chrono::milliseconds(1000))  // 1Hz timer
     {
+        feedback_ = std::make_shared<FollowMeAction::Feedback>();
     }
 
-    void FollowMeActionHandler::stop()
+    bool FollowMeActionHandler::initialize_task(std::shared_ptr<const typename FollowMeAction::Goal> goal)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        const std::string target = goal->vehicle_name;
         
-        // Call base class stop (handles timer cleanup)
-        BaseActionHandler::stop();
+        RCLCPP_INFO(vehicle_->get_logger(), "Executing followme for target: %s", target.c_str());
 
-        if (vehicle_->follow_me_ && vehicle_->current_task_ == TaskType::FollowMe)
-        {
-            vehicle_->follow_me_->stop();
-        }
-
+        // Unsubscribe previous target if present
         if (target_pos_sub_)
         {
             target_pos_sub_.reset();
             current_target_name_.clear();
         }
 
-        if (vehicle_->current_task_ == TaskType::FollowMe)
-        {
-            vehicle_->current_task_ = TaskType::None;
-        }
-
-        RCLCPP_INFO(vehicle_->get_logger(), "Stopped followme task");
-    }
-
-    rclcpp_action::GoalResponse FollowMeActionHandler::handle_goal(
-        const rclcpp_action::GoalUUID &uuid,
-        std::shared_ptr<const FollowMeAction::Goal> goal)
-    {
-        (void)uuid;
-        RCLCPP_INFO(vehicle_->get_logger(), "Received followme goal for target: %s",
-                    goal->vehicle_name.c_str());
-
-        if (goal->vehicle_name.empty())
-        {
-            RCLCPP_WARN(vehicle_->get_logger(), "Empty target name, rejecting goal");
-            return rclcpp_action::GoalResponse::REJECT;
-        }
-
-        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
-    }
-
-    rclcpp_action::CancelResponse FollowMeActionHandler::handle_cancel(
-        const std::shared_ptr<GoalHandleFollowMe> goal_handle)
-    {
-        RCLCPP_INFO(vehicle_->get_logger(), "Received request to cancel followme goal");
-        (void)goal_handle;
-        return rclcpp_action::CancelResponse::ACCEPT;
-    }
-
-    void FollowMeActionHandler::handle_accepted(const std::shared_ptr<GoalHandleFollowMe> goal_handle)
-    {
-        // No need for separate thread - timer will handle periodic checks
-        execute(goal_handle);
-    }
-
-    void FollowMeActionHandler::execute(const std::shared_ptr<GoalHandleFollowMe> goal_handle)
-    {
-        const auto goal = goal_handle->get_goal();
-        const std::string target = goal->vehicle_name;
-        feedback_ = std::make_shared<FollowMeAction::Feedback>();
-        result_ = std::make_shared<FollowMeAction::Result>();
-
-        RCLCPP_INFO(vehicle_->get_logger(), "Executing followme for target: %s", target.c_str());
-
-        {
-            std::lock_guard<std::mutex> lk(mutex_);
-            current_goal_ = goal_handle;
-        }
-
-        {
-            std::lock_guard<std::mutex> lk(vehicle_->mission_mutex_);
-
-            // Unsubscribe previous target if present
-            if (target_pos_sub_)
-            {
-                target_pos_sub_.reset();
-                current_target_name_.clear();
-            }
-
-            current_target_name_ = target;
-        }
+        current_target_name_ = target;
 
         // Ensure armed and start FollowMe
-        vehicle_->ensure_armed_and_takeoff();
+        bool ready = vehicle_->ensure_armed_and_takeoff();
+        if (!ready)
+        {
+            RCLCPP_ERROR(vehicle_->get_logger(), "Vehicle not ready for FollowMe mission");
+            return false;
+        }
+        
         if (vehicle_->follow_me_)
         {
-            vehicle_->follow_me_->start();
+            auto start_result = vehicle_->follow_me_->start();
+            if (start_result != mavsdk::FollowMe::Result::Success)
+            {
+                RCLCPP_ERROR(vehicle_->get_logger(), "Failed to start FollowMe mode");
+                return false;
+            }
         }
 
         // Subscribe to target position
@@ -133,46 +76,66 @@ namespace mission_planner
                 }
             });
 
-        vehicle_->current_task_ = TaskType::FollowMe;
-
-        // Start timer for periodic feedback publishing
-        start_timer();
+        RCLCPP_INFO(vehicle_->get_logger(), "FollowMe mode started successfully");
+        return true;
     }
 
-    void FollowMeActionHandler::timer_callback()
+    void FollowMeActionHandler::stop_task()
     {
-        std::lock_guard<std::mutex> lk(mutex_);
-        
-        if (!current_goal_)
+        if (vehicle_->follow_me_)
         {
-            stop_timer();
-            return;
+            vehicle_->follow_me_->stop();
         }
 
-        // Check if there's a cancel request
-        if (current_goal_->is_canceling())
+        if (target_pos_sub_)
         {
-            stop_timer();
-            result_->distance_to_target_m = 0.0f;
-            current_goal_->canceled(result_);
-            RCLCPP_INFO(vehicle_->get_logger(), "FollowMe goal canceled");
-            current_goal_ = nullptr;
-            vehicle_->current_task_ = TaskType::None;
-            return;
+            target_pos_sub_.reset();
+            current_target_name_.clear();
         }
 
-        // Calculate distance to target and publish feedback
+        RCLCPP_INFO(vehicle_->get_logger(), "Stopped followme task");
+    }
+
+    std::shared_ptr<FollowMeActionHandler::FollowMeAction::Result> FollowMeActionHandler::get_cancel_result()
+    {
+        std::shared_ptr<FollowMeAction::Result> result = std::make_shared<FollowMeAction::Result>();
+        result->distance_to_target_m = feedback_->distance_to_target_m;
+        return result;
+    }
+
+    std::shared_ptr<FollowMeActionHandler::FollowMeAction::Result> FollowMeActionHandler::get_finish_result()
+    {
+        // FollowMe doesn't naturally finish, so this shouldn't be called
+        std::shared_ptr<FollowMeAction::Result> result = std::make_shared<FollowMeAction::Result>();
+        result->distance_to_target_m = feedback_->distance_to_target_m;
+        return result;
+    }
+
+    std::shared_ptr<FollowMeActionHandler::FollowMeAction::Feedback> FollowMeActionHandler::get_feedback()
+    {
+        // Calculate distance to target
+        feedback_->distance_to_target_m = static_cast<float>(
+            mission_planner::utils::haversine_distance(
+                vehicle_->current_position_.latitude_deg, vehicle_->current_position_.longitude_deg,
+                target_position_.latitude_deg, target_position_.longitude_deg));
+
+        return feedback_;
+    }
+
+    bool FollowMeActionHandler::is_finished()
+    {
+        // FollowMe never finishes on its own - it must be canceled
+        return false;
+    }
+
+    bool FollowMeActionHandler::is_goal_valid(const std::shared_ptr<const typename FollowMeAction::Goal> goal)
+    {
+        if (goal->vehicle_name.empty())
         {
-            std::lock_guard<std::mutex> position_lock(vehicle_->mission_mutex_);
-
-            // Use haversine distance for accurate GPS distance calculation
-            feedback_->distance_to_target_m = static_cast<float>(
-                mission_planner::utils::haversine_distance(
-                    vehicle_->current_position_.latitude_deg, vehicle_->current_position_.longitude_deg,
-                    target_position_.latitude_deg, target_position_.longitude_deg));
+            RCLCPP_WARN(vehicle_->get_logger(), "Empty target name, rejecting goal");
+            return false;
         }
-
-        current_goal_->publish_feedback(feedback_);
+        return true;
     }
 
 } // namespace mission_planner
