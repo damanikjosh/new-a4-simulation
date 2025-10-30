@@ -4,3 +4,5 @@ PX4-Autopilot/
 build/
 install/
 log/
+.venv/
+*.pyc
