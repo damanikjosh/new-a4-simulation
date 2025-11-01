@@ -5,7 +5,7 @@ html, body {
 }
 
 #map {
-    height: calc(100% - 40px); /* Adjust height to leave space for checkboxes */
+    height: calc(100% - 80px); /* Adjust height to leave space for two rows of checkboxes */
     margin: 0;
     padding: 0;
 }
