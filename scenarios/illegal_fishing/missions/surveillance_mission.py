@@ -5,8 +5,8 @@ from mavsdk.mission import MissionItem, MissionPlan
 
 class SurveillanceMission(WaypointsMission):
 
-    def __init__(self, vehicle, task_points, vehicle_surveillance, on_target_found=None, *args, **kwargs):
-        super().__init__(vehicle, task_points, *args, **kwargs)
+    def __init__(self, vehicle, task_points, task_indices, vehicle_surveillance, *args, on_progress=None, on_target_found=None, **kwargs):
+        super().__init__(vehicle, task_points, task_indices, *args, on_progress=on_progress, **kwargs)
         self.vehicle_surveillance = vehicle_surveillance
         self.on_target_found = on_target_found
 
@@ -22,5 +22,5 @@ class SurveillanceMission(WaypointsMission):
             if len(ports) > 0:
                 print(f"Vehicle {self.vehicle._port} sees vehicles: {ports}")
                 if self.on_target_found is not None:
-                    self.on_target_found(self.vehicle, vehicles)
+                    await self.on_target_found(self.vehicle, vehicles)
             await asyncio.sleep(1)

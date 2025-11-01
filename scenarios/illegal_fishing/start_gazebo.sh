@@ -4,7 +4,7 @@ PX4_DIR=/home/joshua/Documents/a4_project/new-a4-simulation/PX4-Autopilot
 A4_MODELS_DIR=/home/joshua/Documents/a4_project/new-a4-simulation/a4_models
 
 WORLD=chungdo_illegal_fishing
-SLEEP_TIME=3
+SLEEP_TIME=1
 
 
 # Create log directory with timestamp

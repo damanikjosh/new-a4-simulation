@@ -9,14 +9,24 @@ obstacles = get_chungdo_obstacles()
 
 class WaypointsMission(MissionBase):
 
-    def __init__(self, vehicle, task_points, *args, return_to_launch_after_mission=False, **kwargs):
+    def __init__(self, vehicle, task_points, task_indices, *args, on_progress=None, return_to_launch_after_mission=False, **kwargs):
         super().__init__(vehicle, *args, **kwargs)
         self.task_points = task_points
+        # Append -1 at the first of task_indices to account for takeoff position
+        self.task_indices = np.concatenate([[-1], task_indices, [-1] if return_to_launch_after_mission else []])
+        self.progress_indices = []
         # self.task_indices = np.arange(len(task_points))
         self.done = np.zeros(len(task_points))
         self.return_to_launch_after_mission = return_to_launch_after_mission
+        self.on_progress = on_progress
+        self.is_replanning = False
 
     async def generate_plan(self, relative_altitude_m=30, speed_m_s=20):
+        if len(self.task_points) == 0:
+            # No task points, create empty mission
+            self.mission_plan = MissionPlan([])
+            self.vehicle.mission.set_return_to_launch_after_mission(self.return_to_launch_after_mission)
+            return
         mission_items = []
         current_position = await self.get_position()
         if not self.return_to_launch_after_mission:
@@ -25,7 +35,10 @@ class WaypointsMission(MissionBase):
             home_position = await self.get_home_position()
             waypoints = np.concatenate([[current_position], self.task_points, [home_position]])
             
-        trajectory, task_indices = generate_trajectory(waypoints, obstacles)
+        trajectory, indices = generate_trajectory(waypoints, obstacles)
+        print(f"Vehicle {self.vehicle._port} trajectory indices: {indices}")
+
+        self.progress_indices = self.task_indices[indices]
 
         for lon, lat in trajectory:
             mission_items.append(MissionItem(
@@ -50,15 +63,42 @@ class WaypointsMission(MissionBase):
 
     async def initialize(self, relative_altitude_m=30, speed_m_s=20):
         await super().initialize()
-        
+    
+    def replan(self, task_points, task_indices):
+        self.task_points = task_points
+        self.task_indices = np.concatenate([[-1], task_indices, [-1] if self.return_to_launch_after_mission else []])
+        self.is_replanning = True
+        self.enable()
+        # await self.vehicle.mission.clear_mission()
+        # if self.is_enabled:
+        #     await self.generate_plan()
+        #     if len(self.mission_plan.mission_items) == 0:
+        #         print(f"Vehicle {self.vehicle._port} has no task points, skipping mission upload")
+        #         # Clear mission
+        #         return
+        #     print(f"Vehicle {self.vehicle._port} uploading replan mission ({len(self.mission_plan.mission_items)} items)")
+        #     await self.vehicle.mission.upload_mission(self.mission_plan)
+        #     await asyncio.sleep(1)
+        #     await self.vehicle.mission.start_mission()
 
     async def before_start(self):
         await self.generate_plan()
+        if len(self.mission_plan.mission_items) == 0:
+            print(f"Vehicle {self.vehicle._port} has no task points, skipping mission upload")
+            await self.vehicle.mission.clear_mission()
+            self.disable()
+            return
+        print(f"Vehicle {self.vehicle._port} uploading mission ({len(self.mission_plan.mission_items)} items)")
         await self.vehicle.mission.upload_mission(self.mission_plan)
         # Delay for 1 second to ensure mission is uploaded before starting
         await asyncio.sleep(1)
 
     async def on_start(self):
+        if len(self.mission_plan.mission_items) == 0:
+            print(f"Vehicle {self.vehicle._port} has no mission items, skipping mission start")
+            self.disable()
+            return
+        self.is_replanning = False
         await self.vehicle.mission.start_mission()
 
     def get_coroutines(self):
@@ -68,15 +108,28 @@ class WaypointsMission(MissionBase):
     async def monitor_progress(self):
         
         # Monitor mission progress. Exclude first task (takeoff)
-        last_task = 0
+        last_progress = 0
         try:
             async for mission_progress in self.vehicle.mission.mission_progress():
-                current_task = mission_progress.current
-                if last_task is None:
-                    last_task = current_task
-                total_task = mission_progress.total
-                print(f"Vehicle {self.vehicle._port} is at task {current_task}/{total_task}")
-                last_task = current_task
+                current_progress = mission_progress.current
+                if last_progress is None:
+                    last_progress = current_progress
+                if self.progress_indices[current_progress] != self.progress_indices[last_progress]:
+                    progress_index = self.progress_indices[current_progress]
+                    if self.on_progress is not None and progress_index >= 0:
+                        await self.on_progress(self.vehicle, progress_index)
+                    print(f"Vehicle {self.vehicle._port} reached task index {progress_index}")
+                total_progress = mission_progress.total
+                print(f"Vehicle {self.vehicle._port} is at task {current_progress}/{total_progress}")
+                last_progress = current_progress
+
+                if self.is_replanning:
+                    self.is_replanning = False
+                    # Clear mission to avoid progress jump
+                    await self.vehicle.mission.clear_mission()
+                    await self.before_start()
+                    await self.on_start()
+                    await asyncio.sleep(1)
 
         except asyncio.CancelledError:
             pass

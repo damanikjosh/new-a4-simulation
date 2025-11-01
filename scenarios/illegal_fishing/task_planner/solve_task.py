@@ -1,12 +1,46 @@
+import os
 import numpy as np
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
-from itertools import product
 import shapely
 from sklearn.cluster import KMeans
 import mip
 import matplotlib.pyplot as plt
-from copy import deepcopy
+from matplotlib import cm
+
+# Simple toggle to enable/disable plotting at runtime (non-blocking)
+# Set env var A4_PLOT=1 to enable in deployment without code changes.
+PLOT_DEBUG = os.getenv("A4_PLOT", "0") == "1"
+PLOT_SAVE = os.getenv("A4_PLOT_SAVE", "0") == "1"
+
+def set_plot_enabled(enabled: bool):
+    global PLOT_DEBUG
+    PLOT_DEBUG = bool(enabled)
+
+def _nb_show(fig=None):
+    """Non-blocking show for matplotlib."""
+    if fig is None:
+        fig = plt.gcf()
+    try:
+        fig.tight_layout()
+    except Exception:
+        pass
+    fig.canvas.draw_idle()
+    plt.show(block=False)
+    # Small pause allows UI to refresh without blocking the main loop
+    plt.pause(0.01)
+    try:
+        fig.canvas.flush_events()
+    except Exception:
+        pass
+    if PLOT_SAVE:
+        # Save last figure snapshot for headless debugging
+        out = os.getenv("A4_PLOT_SAVE_PATH", "/tmp/a4_plan_overview.png")
+        try:
+            fig.savefig(out, dpi=120)
+        except Exception:
+            pass
+ 
 
 def solve_ovrp(task_points, start_points, end_points=None):
     num_tasks = len(task_points)
@@ -213,6 +247,8 @@ def solve_hierarchical_ovrp(num_clusters, task_points, start_points, end_points=
     task_clusters = kmeans.labels_
     task_centers = kmeans.cluster_centers_
 
+    # One-figure composite debug plot will be shown after routing
+
     tasks = np.arange(len(task_points))
 
     cluster_routes = solve_ovrp(task_centers, start_points, end_points)
@@ -240,11 +276,15 @@ def solve_hierarchical_ovrp(num_clusters, task_points, start_points, end_points=
             last_vehicle_point = cluster_points[subroute[-1]]
 
         solution.append(solution_k)
+    
+    # One-figure composite plotting: clusters + cluster routes + task routes
+    debug_plot_all(task_points, task_clusters, task_centers, cluster_routes, solution,
+                   start_points=start_points, end_points=end_points, title="Plan overview (clusters + routes)")
     return solution
 
 
 def detect_subtours(assign_task, num_tasks):
-    from collections import defaultdict, deque
+    from collections import defaultdict
 
     # Create adjacency list from the decision variables
     graph = defaultdict(list)
@@ -287,7 +327,7 @@ def plot_solution(task_points, vehicle_points, solution):
         route_points = task_points[route]
         plt.plot(route_points[:, 0], route_points[:, 1], '->', label=f'Vehicle {k}')
     plt.legend()
-    plt.show()
+    _nb_show()
 
 def plot_trajectories(trajectories):
     plt.figure()
@@ -304,7 +344,171 @@ def plot_trajectories(trajectories):
             for polygon in obstacle:
                 x, y = polygon.exterior.xy
                 plt.plot(x, y, "-r")
-    plt.show()
+    _nb_show()
+
+def debug_plot_clusters(task_points, labels, medoid_indices, start_points=None, end_points=None, title="Clusters"):
+    if not PLOT_DEBUG:
+        return
+    task_points = np.asarray(task_points)
+    labels = np.asarray(labels)
+    fig, ax = plt.subplots(figsize=(7, 6))
+    cmap = cm.get_cmap('tab20')
+    unique_labels = np.unique(labels)
+    for lab in unique_labels:
+        pts = task_points[labels == lab]
+        if len(pts) == 0:
+            continue
+        color = cmap(int(lab) % 20)
+        ax.scatter(pts[:, 0], pts[:, 1], s=15, color=color, label=f'C{lab}', alpha=0.7)
+    # Highlight medoids
+    if medoid_indices is not None and len(medoid_indices) > 0:
+        med = task_points[np.asarray(medoid_indices, dtype=int)]
+        ax.scatter(med[:, 0], med[:, 1], s=80, marker='*', edgecolors='k', facecolors='gold', label='Medoids')
+    # Start/end points
+    if start_points is not None:
+        sp = np.asarray(start_points)
+        ax.scatter(sp[:, 0], sp[:, 1], s=60, marker='^', color='red', label='Starts')
+    if end_points is not None:
+        ep = np.asarray(end_points)
+        ax.scatter(ep[:, 0], ep[:, 1], s=60, marker='v', color='green', label='Ends')
+    ax.set_title(title)
+    ax.legend(loc='best', fontsize=8)
+    ax.set_xlabel('Lon')
+    ax.set_ylabel('Lat')
+    _nb_show(fig)
+
+def debug_plot_routes(task_points, solutions, start_points=None, end_points=None, title="Routes"):
+    if not PLOT_DEBUG:
+        return
+    task_points = np.asarray(task_points)
+    fig, ax = plt.subplots(figsize=(7, 6))
+    # Plot all tasks in light color
+    ax.scatter(task_points[:, 0], task_points[:, 1], s=10, color='#bbbbbb', label='Tasks')
+    colors = cm.get_cmap('tab10')
+    for k, route in enumerate(solutions):
+        if route is None or len(route) == 0:
+            continue
+        pts = task_points[route]
+        ax.plot(pts[:, 0], pts[:, 1], '-o', ms=3, color=colors(k % 10), label=f'Veh {k}')
+    if start_points is not None:
+        sp = np.asarray(start_points)
+        ax.scatter(sp[:, 0], sp[:, 1], s=60, marker='^', color='red', label='Starts')
+    if end_points is not None:
+        ep = np.asarray(end_points)
+        ax.scatter(ep[:, 0], ep[:, 1], s=60, marker='v', color='green', label='Ends')
+    ax.set_title(title)
+    ax.legend(loc='best', fontsize=8)
+    ax.set_xlabel('Lon')
+    ax.set_ylabel('Lat')
+    _nb_show(fig)
+
+def debug_plot_cluster_routes(cluster_points, cluster_routes, start_points=None, end_points=None, title="Cluster routes"):
+    if not PLOT_DEBUG:
+        return
+    cps = np.asarray(cluster_points)
+    fig, ax = plt.subplots(figsize=(7, 6))
+    # Plot cluster centers/medoids
+    ax.scatter(cps[:, 0], cps[:, 1], s=30, color='tab:blue', label='Clusters')
+    colors = cm.get_cmap('tab10')
+    for k, route in enumerate(cluster_routes):
+        if route is None or len(route) == 0:
+            continue
+        pts = cps[route]
+        ax.plot(pts[:, 0], pts[:, 1], '-o', ms=3, color=colors(k % 10), label=f'Veh Cseq {k}')
+        # Draw leg from start to first cluster center for context
+        if start_points is not None:
+            sp = np.asarray(start_points)
+            ax.plot([sp[k, 0], pts[0, 0]], [sp[k, 1], pts[0, 1]], '--', color=colors(k % 10), alpha=0.6)
+    if start_points is not None:
+        sp = np.asarray(start_points)
+        ax.scatter(sp[:, 0], sp[:, 1], s=60, marker='^', color='red', label='Starts')
+    if end_points is not None:
+        ep = np.asarray(end_points)
+        ax.scatter(ep[:, 0], ep[:, 1], s=60, marker='v', color='green', label='Ends')
+    ax.set_title(title)
+    ax.legend(loc='best', fontsize=8)
+    ax.set_xlabel('Lon')
+    ax.set_ylabel('Lat')
+    _nb_show(fig)
+
+def debug_plot_all(task_points, labels, cluster_points, cluster_routes, solutions,
+                   start_points=None, end_points=None, title="Plan overview"):
+    if not PLOT_DEBUG:
+        return
+    tp = np.asarray(task_points)
+    cps = np.asarray(cluster_points) if cluster_points is not None else None
+    labels = np.asarray(labels) if labels is not None else None
+
+    fig, ax = plt.subplots(figsize=(8, 7))
+    colors = cm.get_cmap('tab10')
+    cluster_cmap = cm.get_cmap('tab20')
+
+    # Debug counts to stdout to help when figure appears empty
+    try:
+        print(f"[PLOT] tasks={len(tp)} clusters={0 if cps is None else len(cps)}",
+              f"solutions={[0 if r is None else len(r) for r in (solutions or [])]}",
+              f"cluster_routes={[0 if r is None else len(r) for r in (cluster_routes or [])]}")
+    except Exception:
+        pass
+
+    # Plot tasks (colored by cluster label if provided)
+    if labels is not None:
+        unique_labels = np.unique(labels)
+        for lab in unique_labels:
+            pts = tp[labels == lab]
+            if len(pts) == 0:
+                continue
+            ax.scatter(pts[:, 0], pts[:, 1], s=12, color=cluster_cmap(int(lab) % 20), alpha=0.65,
+                       label=f'C{int(lab)}')
+    else:
+        if tp.size:
+            ax.scatter(tp[:, 0], tp[:, 1], s=12, color='#bbbbbb', label='Tasks')
+
+    # Plot cluster points (centers/medoids)
+    if cps is not None and len(cps) > 0:
+        ax.scatter(cps[:, 0], cps[:, 1], s=70, marker='s', edgecolors='k', facecolors='gold',
+                   linewidths=0.7, label='Clusters')
+
+    # Plot per-vehicle cluster routes on top (dashed)
+    if cluster_routes is not None:
+        for k, route in enumerate(cluster_routes):
+            if route is None or len(route) == 0:
+                continue
+            if cps is None:
+                continue
+            pts = cps[route]
+            ax.plot(pts[:, 0], pts[:, 1], '--o', ms=3, color=colors(k % 10), alpha=0.7,
+                    label=f'Veh {k} clusters')
+            # Draw leg from start to first cluster center for context
+            if start_points is not None:
+                sp = np.asarray(start_points)
+                ax.plot([sp[k, 0], pts[0, 0]], [sp[k, 1], pts[0, 1]], ':', color=colors(k % 10), alpha=0.6)
+
+    # Plot per-vehicle task routes (solid)
+    if solutions is not None:
+        for k, route in enumerate(solutions):
+            if route is None or len(route) == 0:
+                continue
+            pts = tp[route]
+            ax.plot(pts[:, 0], pts[:, 1], '-o', ms=3, color=colors(k % 10), label=f'Veh {k} tasks')
+
+    # Start/end points
+    if start_points is not None:
+        sp = np.asarray(start_points)
+        ax.scatter(sp[:, 0], sp[:, 1], s=70, marker='^', color='red', label='Starts')
+    if end_points is not None:
+        ep = np.asarray(end_points)
+        ax.scatter(ep[:, 0], ep[:, 1], s=70, marker='v', color='green', label='Ends')
+
+    ax.set_title(title)
+    ax.legend(loc='best', fontsize=8, ncol=2)
+    ax.set_xlabel('Lon')
+    ax.set_ylabel('Lat')
+    try:
+        ax.set_aspect('equal', adjustable='datalim')
+    except Exception:
+        pass
+    _nb_show(fig)
 
 def solve_task(task_points, task_reqs, task_done, vehicle_points):
     assert task_reqs.shape[0] == len(task_points), "Number of points should match number of requirements"
@@ -333,7 +537,9 @@ def solve_task(task_points, task_reqs, task_done, vehicle_points):
     # Algorithm 3: Hierarchical Open Vehicle Routing Problem
     solution = solve_hierarchical_ovrp(num_vehicle, task_points[task_avail], vehicle_points, vehicle_points)
 
-    solution_points = [task_points[route] for route in solution]
+    # IMPORTANT: routes are indices into the sliced array task_points[task_avail]
+    # so map points from that same sliced view to keep indices and coordinates aligned
+    solution_points = [task_points[task_avail][route] for route in solution]
     solution_idx = [np.array(task_avail)[solution_k] for solution_k in solution]
     print('Solution:')
     for k, solution_k in enumerate(solution_idx):
